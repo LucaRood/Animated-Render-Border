@@ -30,6 +30,7 @@ from mathutils import Vector
 from bpy_extras.object_utils import world_to_camera_view
 from bpy.app.handlers import persistent
 from itertools import chain
+import os.path
 
 trackableObjectTypes = ["MESH", "FONT", "CURVE", "SURFACE", "META", "LATTICE", "ARMATURE"] #EMPTY, LAMP, CAMERA and SPEAKER objects cannot currently be tracked.
 noVertexObjectTypes = ["FONT", "META"]
@@ -261,6 +262,8 @@ class animatedRenderBorderProperties(bpy.types.PropertyGroup):
 
     border_max_y = bpy.props.FloatProperty(description="Maximum Y value for the render border", default=1, min=0.01, max=1, update=updateBorderWithMaxY)    
 
+    multi_object = bpy.props.BoolProperty(default=False, description="Track a separate border for each object in the group", update=updateFrame)
+
 
 
 #########Frame Handler########################################################
@@ -271,7 +274,7 @@ class animatedRenderBorderProperties(bpy.types.PropertyGroup):
 
 
 @persistent
-def animated_render_border(scene):
+def animated_render_border(scene, num=0):
         
     scene = bpy.context.scene
     camera = scene.camera
@@ -286,12 +289,14 @@ def animated_render_border(scene):
     if border.enable and cameraExists:
         #If object is chosen but consequently renamed, it can't be tracked.
         if validObject() or validGroup(): 
-        
             objs = [] 
             if border.type == "Object":  
                 objs = [bpy.data.objects[border.object]]
             elif border.type == "Group":
-                objs = (object for object in bpy.data.groups[border.group].objects if object.type in trackableObjectTypes) #Type of objects that can be tracked
+                if border.multi_object == True:
+                    objs = [bpy.data.groups[border.group].objects[num]]
+                else:
+                    objs = (object for object in bpy.data.groups[border.group].objects if object.type in trackableObjectTypes) #Type of objects that can be tracked
             
             coords_2d = []
             for obj in objs:
@@ -426,6 +431,7 @@ def updateObjectList(scene):
 ###########Functions############################################################
 
 def render(self, context):
+    border = context.scene.animated_render_border
     
     #If blender is being run in the background (command line) do not use the modal renderer
     if bpy.app.background:
@@ -435,20 +441,28 @@ def render(self, context):
         oldStart = context.scene.frame_start
         oldEnd = context.scene.frame_end
         oldCurrent = context.scene.frame_current
+        oldPath = os.path.splitext(context.scene.render.filepath)
                 
         for i in range(oldStart, oldEnd+1):
                             
             context.scene.frame_set(i)
-            animated_render_border(context.scene)
             
             context.scene.frame_start = i
             context.scene.frame_end = i
              
-            bpy.ops.render.render(animation=True)
+            if border.type == "Group" and border.multi_object == True:
+                for num, ob in enumerate(bpy.data.groups[border.group].objects):
+                    context.scene.render.filepath = oldPath[0] + "_" + ob.name + oldPath[1]
+                    animated_render_border(context.scene, num)
+                    bpy.ops.render.render(animation=True)
+            else:
+                animated_render_border(context.scene)
+                bpy.ops.render.render(animation=True)
                 
         context.scene.frame_current = oldCurrent    
         context.scene.frame_start = oldStart
         context.scene.frame_end = oldEnd
+        context.scene.render.filepath = oldPath[0] + oldPath[1]
 
     else:
     
@@ -461,12 +475,18 @@ def render(self, context):
             print("Rendering frame "+str(self.counter))
                     
             context.scene.frame_set(self.counter)
-            animated_render_border(context.scene)
             
             context.scene.frame_start = self.counter
             context.scene.frame_end = self.counter
              
-            bpy.ops.render.render(animation=True)
+            if border.type == "Group" and border.multi_object == True:
+                for num, ob in enumerate(bpy.data.groups[border.group].objects):
+                    context.scene.render.filepath = self.oldPath[0] + "_" + ob.name + self.oldPath[1]
+                    animated_render_border(context.scene, num)
+                    bpy.ops.render.render(animation=True)
+            else:
+                animated_render_border(context.scene)
+                bpy.ops.render.render(animation=True)
             
             context.window_manager.progress_update(self.counter)
             
@@ -478,6 +498,7 @@ def endRender(self, context):
     context.scene.frame_current = self.oldCurrent    
     context.scene.frame_start = self.oldStart
     context.scene.frame_end = self.oldEnd
+    context.scene.render.filepath = self.oldPath[0] + self.oldPath[1]
     
     context.window_manager.event_timer_remove(self.timer)
     self.timer = None
@@ -842,6 +863,11 @@ class RENDER_PT_animated_render_border(bpy.types.Panel):
             row = column.row()
             row.enabled = enabled                 
             row.prop(scene.animated_render_border, "draw_bounding_box", text="Draw Bounding Box")                
+
+            if border.type == "Group":
+                row = column.row()
+                row.enabled = enabled
+                row.prop(scene.animated_render_border, "multi_object", text="Border on individual objects")
   
             row = column.row()     
             row.enabled = enabled and error == 0
@@ -880,6 +906,7 @@ class RENDER_OT_animated_render_border_render(bpy.types.Operator):
     oldStart = 0
     oldEnd = 0
     oldCurrent = 0
+    oldPath = []
 
     #Only use modal if blender is not being run in the background (command line)
     if not bpy.app.background:
@@ -933,6 +960,7 @@ class RENDER_OT_animated_render_border_render(bpy.types.Operator):
                 self.oldStart = bpy.context.scene.frame_start
                 self.oldEnd = bpy.context.scene.frame_end
                 self.oldCurrent = bpy.context.scene.frame_current
+                self.oldPath = os.path.splitext(bpy.context.scene.render.filepath)
                 
                 context.window_manager.progress_begin(0,context.scene.frame_end)
                 
