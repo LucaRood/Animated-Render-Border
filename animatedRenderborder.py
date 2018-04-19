@@ -430,6 +430,31 @@ def updateObjectList(scene):
 
 ###########Functions############################################################
 
+def preparePath(path):
+    directory, name = os.path.split(path)
+    name, ext = os.path.splitext(name) if not name.endswith("#") else (name, "")
+    count = 0
+
+    if len(name) == 0:
+        return (os.path.join(directory, name), ext)
+
+    for char in reversed(name):
+        if char == "#":
+            count += 1
+        else:
+            break
+
+    ext = "#" * count + ext
+    name = name.rstrip("#")
+
+    if name[-1] in [".", "-", "_"]:
+        ext = name[-1] + ext
+    else:
+        name += "_"
+        ext = "_" + ext
+
+    return (os.path.join(directory, name), ext)
+
 def render(self, context):
     border = context.scene.animated_render_border
     
@@ -441,7 +466,8 @@ def render(self, context):
         oldStart = context.scene.frame_start
         oldEnd = context.scene.frame_end
         oldCurrent = context.scene.frame_current
-        oldPath = os.path.splitext(context.scene.render.filepath)
+        oldPath = context.scene.render.filepath
+        pathComps = preparePath(oldPath)
                 
         for i in range(oldStart, oldEnd+1):
                             
@@ -452,7 +478,7 @@ def render(self, context):
              
             if border.type == "Group" and border.multi_object == True:
                 for num, ob in enumerate(bpy.data.groups[border.group].objects):
-                    context.scene.render.filepath = oldPath[0] + "_" + ob.name + oldPath[1]
+                    context.scene.render.filepath = pathComps[0] + ob.name + pathComps[1]
                     animated_render_border(context.scene, num)
                     bpy.ops.render.render(animation=True)
             else:
@@ -462,7 +488,7 @@ def render(self, context):
         context.scene.frame_current = oldCurrent    
         context.scene.frame_start = oldStart
         context.scene.frame_end = oldEnd
-        context.scene.render.filepath = oldPath[0] + oldPath[1]
+        context.scene.render.filepath = oldPath
 
     else:
     
@@ -481,7 +507,7 @@ def render(self, context):
              
             if border.type == "Group" and border.multi_object == True:
                 for num, ob in enumerate(bpy.data.groups[border.group].objects):
-                    context.scene.render.filepath = self.oldPath[0] + "_" + ob.name + self.oldPath[1]
+                    context.scene.render.filepath = self.pathComps[0] + ob.name + self.pathComps[1]
                     animated_render_border(context.scene, num)
                     bpy.ops.render.render(animation=True)
             else:
@@ -498,7 +524,7 @@ def endRender(self, context):
     context.scene.frame_current = self.oldCurrent    
     context.scene.frame_start = self.oldStart
     context.scene.frame_end = self.oldEnd
-    context.scene.render.filepath = self.oldPath[0] + self.oldPath[1]
+    context.scene.render.filepath = self.oldPath
     
     context.window_manager.event_timer_remove(self.timer)
     self.timer = None
@@ -906,7 +932,8 @@ class RENDER_OT_animated_render_border_render(bpy.types.Operator):
     oldStart = 0
     oldEnd = 0
     oldCurrent = 0
-    oldPath = []
+    oldPath = ""
+    pathComps = ()
 
     #Only use modal if blender is not being run in the background (command line)
     if not bpy.app.background:
@@ -960,7 +987,8 @@ class RENDER_OT_animated_render_border_render(bpy.types.Operator):
                 self.oldStart = bpy.context.scene.frame_start
                 self.oldEnd = bpy.context.scene.frame_end
                 self.oldCurrent = bpy.context.scene.frame_current
-                self.oldPath = os.path.splitext(bpy.context.scene.render.filepath)
+                self.oldPath = bpy.context.scene.render.filepath
+                self.pathComps = preparePath(self.oldPath)
                 
                 context.window_manager.progress_begin(0,context.scene.frame_end)
                 
